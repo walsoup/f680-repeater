@@ -59,18 +59,25 @@ The `.bss` base address shifts on every boot, so never hardcode it. Full disasse
 
 ## Quick start
 
-1. Connect your laptop to the F680's 2.4 GHz Wi-Fi or an Ethernet LAN port.
-2. Run the onboarding script:
+1. Clone this repository and enter the directory:
+
+   ```bash
+   git clone https://github.com/walsoup/f680-repeater.git
+   cd f680-repeater
+   ```
+
+2. Connect your laptop to the F680's 2.4 GHz Wi-Fi or an Ethernet LAN port.
+3. Run the onboarding script:
 
    ```bash
    ./start-repeater.sh          # Linux/macOS
    start-repeater.bat           # Windows
    ```
 
-3. Enter the GPON serial if prompted (or press Enter to skip). The script unlocks factory telnet automatically using known ZTE keys, falling back to your serial or a custom factory password.
-4. Pick a 5 GHz network from the router's `wlandiagcli scan 1` output and enter the Wi-Fi password (or press Enter for an Open AP).
-5. The script checks local payload sha256 sums against `tools/checksums.txt`, checks that `mt7615_ap` is loaded and `/userconfig` has enough free flash, serves the payload over HTTP, verifies uploaded sizes with `ls -l`, confirms `cg_hdswitch_on` holds an expected value before poking kernel memory, sends `/userconfig/upstream.conf` over a one-time ephemeral HTTP URL (never over telnet), runs `/userconfig/repeater_up.sh`, and tests HTTP from the laptop.
-6. Connect any client to the F680's 2.4 GHz AP and test.
+4. Enter the GPON serial if prompted (or press Enter to skip). The script unlocks factory telnet automatically using known ZTE keys, falling back to your serial or a custom factory password.
+5. Pick a 5 GHz network from the router's `wlandiagcli scan 1` output and enter the Wi-Fi password (or press Enter for an Open AP).
+6. The script checks local payload sha256 sums against `tools/checksums.txt`, checks that `mt7615_ap` is loaded and `/userconfig` has enough free flash, serves the payload over HTTP, verifies uploaded sizes with `ls -l`, confirms `cg_hdswitch_on` holds an expected value before poking kernel memory, sends `/userconfig/upstream.conf` over a one-time ephemeral HTTP URL (never over telnet), runs `/userconfig/repeater_up.sh`, and tests HTTP from the laptop.
+7. Connect any client to the F680's 2.4 GHz AP and test.
 
 If anything fails mid-run, `start-repeater` prints the likely cause plus a redacted Markdown report (credentials, MACs, emails, and public IPs stripped) you can paste into a GitHub issue.
 
