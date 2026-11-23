@@ -50,10 +50,10 @@ The `.bss` base address shifts on every boot, so never hardcode it. Full disasse
 ## Requirements and ground rules
 
 * A ZTE F680 on firmware `ZTEGF680606MA` (earlier builds may work, but verify the `.bss` offset first).
-* A laptop on the F680's LAN or 2.4 GHz Wi-Fi (`192.168.12.x`) with Python 3.
+* A laptop connected to the F680's LAN or 2.4 GHz Wi-Fi with Python 3 installed.
 * An upstream 5 GHz WPA2-PSK or Open AP. A 2.4 GHz-only upstream will not work here.
+* **Router IP (`--ip` flag):** The script defaults to `--ip 192.168.12.1`. Most stock F680 units use `192.168.1.1` or `192.168.11.1`. **Always pass `--ip <router-ip>`** to match your router's gateway IP.
 * Optional: the router's GPON serial from the bottom label (`ZTEG...`). The script tries known ZTE factory keys first and only uses the serial as a fallback (see [`tools/factory_unlock.md`](tools/factory_unlock.md)).
-* The installer defaults to `192.168.12.1`. If your F680 is still on its factory IP, pass `--ip <router-ip>`, and double-check that it is actually the F680 and not your upstream AP.
 * Never kill `cspd`, and leave the upstream AP config alone.
 * `/userconfig/upstream.conf` is written mode `600`. Keep it out of commits, logs, and issue reports.
 
@@ -66,13 +66,15 @@ The `.bss` base address shifts on every boot, so never hardcode it. Full disasse
    cd f680-repeater
    ```
 
-2. Connect your laptop to the F680's 2.4 GHz Wi-Fi or an Ethernet LAN port.
-3. Run the onboarding script:
+2. Connect your laptop to the F680's 2.4 GHz Wi-Fi or an Ethernet LAN port. Check your default gateway IP (usually `192.168.1.1` or `192.168.11.1`).
+3. Run the onboarding script using the `--ip` flag pointing to your F680:
 
    ```bash
-   ./start-repeater.sh          # Linux/macOS
-   start-repeater.bat           # Windows
+   ./start-repeater.sh --ip 192.168.1.1          # Linux/macOS (replace with your router's IP)
+   start-repeater.bat --ip 192.168.1.1           # Windows
    ```
+
+   *(Using the `--ip` flag is strongly encouraged to ensure you target the right router gateway).*
 
 4. Enter the GPON serial if prompted (or press Enter to skip). The script unlocks factory telnet automatically using known ZTE keys, falling back to your serial or a custom factory password.
 5. Pick a 5 GHz network from the router's `wlandiagcli scan 1` output and enter the Wi-Fi password (or press Enter for an Open AP).
@@ -82,6 +84,24 @@ The `.bss` base address shifts on every boot, so never hardcode it. Full disasse
 If anything fails mid-run, `start-repeater` prints the likely cause plus a redacted Markdown report (credentials, MACs, emails, and public IPs stripped) you can paste into a GitHub issue.
 
 **Useful flags:** `--ip <router>` (default `192.168.12.1`), `--scan-only`, `--restore` (re-runs `restore_after_boot.sh` after a reboot), `--serve-only` (manual payload server), and `--factory-pass`. Non-interactive runs take `--ssid`, `--bssid`, `--channel`, `--psk`, and `--serial`. Opt-in Enterprise flags: `--enterprise`, `--eap-identity`, `--eap-password`, `--eap-anon-identity`, `--eap-ca`, `--tls12-only`.
+
+### Router IP and subnet management
+
+* **Use the `--ip` flag:**
+  Stock ZTE F680 units ship with factory IPs like `192.168.1.1` or `192.168.11.1` (depending on ISP firmware), whereas this development repo used `192.168.12.1`. Always specify `--ip <router-ip>` whenever running the onboarding or recovery tools.
+
+* **Avoiding upstream subnet collisions:**
+  Because the repeater operates in routed NAT mode, the F680's local subnet (`br0`) **must not overlap** with the upstream network's subnet. For example, if your upstream Wi-Fi assigns addresses in `192.168.1.0/24`, the F680's LAN cannot also be `192.168.1.0/24`.
+
+* **How to change the F680 LAN IP permanently:**
+  If you need to change your F680 subnet (e.g. to `192.168.12.1`):
+  1. Open the F680 Web UI in your browser (`http://<router-ip>`, e.g., `http://192.168.1.1`).
+  2. Navigate to **Local Network** / **Network** > **LAN** > **IPv4**.
+  3. Change the IPv4 Address (e.g. `192.168.12.1`) and update the DHCP pool range (e.g. `192.168.12.100` – `192.168.12.200`).
+  4. Click **Apply** and wait for the router to restart DHCP.
+  
+  > [!IMPORTANT]
+  > Never change `br0`'s IP address using raw `ifconfig br0 <ip>` in telnet. The web management services (`cspd`/`httpd`) validate the database-configured IP, and raw `ifconfig` changes will cause `400 Bad Request` errors in the web UI. Always change it through the Web UI or DB commands (`sendcmd 1 DB set IPv4Address 0 IPAddress <ip>`).
 
 ## What `repeater_up.sh` does
 
