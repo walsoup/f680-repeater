@@ -1,0 +1,69 @@
+#!/bin/sh
+# /userconfig/udhcpc.script -- udhcpc lease applier for apcli0.
+# $1 = bound|renew|deconfig
+# Env: interface ip prefix subnet router dns broadcast lease serverid
+
+if [ "$1" = "deconfig" ]; then
+    ip addr flush dev "$interface" 2>/dev/null
+    exit 0
+fi
+
+[ -n "$interface" ] || interface=apcli0
+[ -n "$ip" ] || exit 1
+[ -n "$prefix" ] || prefix=24
+
+ip addr flush dev "$interface" 2>/dev/null
+if [ -n "$broadcast" ]; then
+    ip addr add "$ip/$prefix" brd "$broadcast" dev "$interface"
+else
+    ip addr add "$ip/$prefix" dev "$interface"
+fi
+
+if [ -n "$router" ]; then
+    ip route replace default via "$router" dev "$interface"
+fi
+
+# Remember the lease for the next boot (last-lease/unicast renewal).
+echo "LAST_IP=\"$ip\"" > /userconfig/last_lease
+echo "LAST_PREFIX=\"$prefix\"" >> /userconfig/last_lease
+echo "LAST_GATEWAY=\"$router\"" >> /userconfig/last_lease
+echo "LAST_BROADCAST=\"$broadcast\"" >> /userconfig/last_lease
+chmod 600 /userconfig/last_lease
+
+# Feed the upstream DNS to dnsmasq / the router resolver.
+if [ -n "$dns" ]; then
+    : > /var/tmp/default_resolv.conf
+    : > /var/tmp/default_resolv_proxy.conf
+    : > /var/tmp/resolv.conf
+    first_dns=""
+    second_dns=""
+    for s in $dns; do
+        echo "nameserver $s" >> /var/tmp/default_resolv.conf
+        echo "nameserver $s" >> /var/tmp/default_resolv_proxy.conf
+        echo "nameserver $s" >> /var/tmp/resolv.conf
+        if [ -z "$first_dns" ]; then
+            first_dns="$s"
+        elif [ -z "$second_dns" ]; then
+            second_dns="$s"
+        fi
+    done
+    killall -HUP dnsmasq 2>/dev/null
+
+    if [ -n "$first_dns" ]; then
+        iptables -t nat -N F680_DNS 2>/dev/null || true
+        iptables -t nat -F F680_DNS
+        iptables -t nat -D PREROUTING -i br0 -j F680_DNS 2>/dev/null
+        iptables -t nat -I PREROUTING 1 -i br0 -j F680_DNS
+        iptables -t nat -A F680_DNS -p udp --dport 53 -j DNAT --to-destination "${first_dns}:53"
+        iptables -t nat -A F680_DNS -p tcp --dport 53 -j DNAT --to-destination "${first_dns}:53"
+        sendcmd 1 DB set DHCP4sPool 0 DNSServers1 "$first_dns" 2>/dev/null
+        if [ -n "$second_dns" ]; then
+            sendcmd 1 DB set DHCP4sPool 0 DNSServers2 "$second_dns" 2>/dev/null
+        else
+            sendcmd 1 DB set DHCP4sPool 0 DNSServers2 "$first_dns" 2>/dev/null
+        fi
+    fi
+fi
+
+: > /userconfig/lease_ok
+exit 0

@@ -1,0 +1,19 @@
+[package]
+name = "eap_ttls"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12"] }
+rustls-rustcrypto = { version = "0.1.0-pre.0" }
+rustls-pki-types = "1"
+rustls-pemfile = "2"
+webpki = { package = "rustls-webpki", version = "0.103", default-features = false, features = ["alloc"] }
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+panic = "abort"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,21 @@
+# Copy this to /userconfig/upstream.conf and fill in your Wi-Fi.
+# chmod 600 /userconfig/upstream.conf
+#
+# Leave UP_BSSID and UP_CHANNEL empty for 5 GHz auto-discovery.
+# Set them if the scan is unreliable or there are multiple BSSIDs.
+# Leave UP_PSK='' to join an Open / captive-portal AP (no WPA2 key).
+
+UP_SSID='YourDormWiFi'
+UP_PSK='YourWPA2Password'
+UP_BSSID=''
+UP_CHANNEL=''
+
+# Optional WPA2-Enterprise (EAP-TTLS/PAP) configuration:
+# To use, set UP_AUTH='wpa2-eap' and configure the parameters below.
+# Password lives separately in /userconfig/eap_pass (chmod 600) so arbitrary characters never break ash sourcing.
+# UP_AUTH='wpa2-eap'
+# UP_EAP_IDENTITY='user@example.edu'
+# UP_EAP_ANON_ID=''
+# UP_EAP_CA='/userconfig/eap_ca.pem'
+# UP_EAP_TLS12_ONLY='0'
+

@@ -1,0 +1,21 @@
+NOTICE
+
+The MIT license in this repository covers the original scripts, source code,
+and documentation.
+
+No vendor firmware binary is distributed in this repo. See
+`docs/BOOT_PERSISTENCE.md` for the technical explanation of the `pc`/`libbbx.so`
+boot loader finding.
+
+`kmemtool`, `udhcpc`, `eap_ttls`, `repeater_up.sh`, `udhcpc.script`, `restore_after_boot.sh`,
+`verify_repeater.sh`, `start-repeater.sh`, `start-repeater.bat`, `tools/serve.py`, and the
+documentation are original work released under the MIT license.
+`eap_ttls` incorporates permissive pure-Rust open-source dependencies (rustls, rustls-rustcrypto, rustls-webpki, libc) under their respective Apache-2.0, MIT, and ISC licenses.
+
+`tools/onboard.py` and `tools/zte_factorymode.py` implement the ZTE FactoryMode
+handshake adapted from douniwan5788's `zte_modem_tools`
+(https://github.com/douniwan5788/zte_modem_tools) and are licensed under
+AGPL-3.0. The full license is in `LICENSES/AGPL-3.0.txt`.
+
+ZTE, ZXHN, Orange, MediaTek, and related names are trademarks of their
+respective owners. This project is not affiliated with or endorsed by them.
