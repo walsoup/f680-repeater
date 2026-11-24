@@ -3,11 +3,21 @@
 # Never bridges apcli0, never touches br0/wlan0, never starts telnetd.
 trap '' HUP
 
+if ! mkdir /tmp/f680_repeater_up.lock 2>/dev/null; then
+    echo "repeater_up is already running; abort"
+    exit 1
+fi
+trap 'rmdir /tmp/f680_repeater_up.lock 2>/dev/null' EXIT INT TERM
+
 LOG=/userconfig/repeater_boot.log
 exec > "$LOG" 2>&1
 
 echo "=== repeater_up start ==="
 date
+
+killall -9 udhcpc eap_ttls 2>/dev/null
+sleep 1
+iwpriv apcli0 set ApCliEnable=0 2>/dev/null
 
 # 0. Never leave apcli0 bridged into br0.
 brctl delif br0 apcli0 2>/dev/null
@@ -103,52 +113,78 @@ else
     echo "auth=open ssid=$UP_SSID bssid=$UP_BSSID channel=$UP_CHANNEL"
 fi
 
-# 4. Auto-channel scan when UP_CHANNEL is empty.
-scan_pick() {
-    wlandiagcli scan 1 2>/dev/null | awk -v ssid="$UP_SSID" -v want="$UP_BSSID" -v auth="$UP_AUTH" '
-        BEGIN { best=-9999 }
+# 4. Live 5 GHz Scan (BSSID-First, Same-SSID Fallback).
+scan_resolve() {
+    wlandiagcli scan 1 2>/dev/null | awk -v target_ssid="$UP_SSID" -v target_bssid="$UP_BSSID" '
+        BEGIN {
+            found_bssid = 0
+            found_ssid = 0
+            best_rssi = -9999
+        }
         {
-            s=substr($0,1,35); gsub(/ +$/,"",s)
-            b=substr($0,36,25); gsub(/ +$/,"",b)
-            if (b ~ /^[0-9a-fA-F][0-9a-fA-F]:/) {
-                sig=substr($0,61,10); gsub(/dBm/,"",sig); gsub(/ /,"",sig)
-                ch=substr($0,71,10); gsub(/ /,"",ch)
-                sec=substr($0,81,40); gsub(/ +$/,"",sec)
-                if (s == ssid || (want != "" && b == want)) {
-                    pref=0
-                    if (auth == "wpa2-psk" && sec ~ /WPA2-PSK-AES/) { pref=1000 }
-                    score=pref + sig
-                    if (score > best) { best=score; out=b" "ch" "sec }
+            for (i = 1; i <= NF; i++) {
+                if (length($i) == 17 && split($i, oct, ":") == 6) {
+                    bssid = $i
+                    idx = index($0, bssid)
+                    ssid = substr($0, 1, idx - 1)
+                    sub(/[ \t]+$/, "", ssid)
+                    rssi = $(i+1) + 0
+                    ch = $(i+2) + 0
+
+                    if (target_bssid != "" && tolower(bssid) == tolower(target_bssid)) {
+                        exact_bssid = bssid
+                        exact_ch = ch
+                        found_bssid = 1
+                    }
+                    if (target_ssid != "" && ssid == target_ssid) {
+                        if (found_ssid == 0 || rssi > best_rssi) {
+                            best_rssi = rssi
+                            best_bssid = bssid
+                            best_ch = ch
+                            found_ssid = 1
+                        }
+                    }
+                    break
                 }
             }
         }
-        END { print out }'
+        END {
+            if (found_bssid) {
+                print exact_bssid " " exact_ch
+            } else if (found_ssid) {
+                print best_bssid " " best_ch
+            }
+        }'
 }
-if [ -z "$UP_CHANNEL" ]; then
-    echo "scanning 5G for $UP_SSID ..."
-    LINE=$(scan_pick)
-    if [ -z "$LINE" ]; then
-        echo "scan empty; retry in 10s"
-        sleep 10
-        LINE=$(scan_pick)
-    fi
-    echo "scan_choice=$LINE"
-    if [ -z "$LINE" ]; then
-        echo "SSID not found in 5G scan"
-        exit 1
-    fi
-    BSSID=$(echo "$LINE" | awk '{print $1}')
-    CH=$(echo "$LINE" | awk '{print $2}')
-    SEC=$(echo "$LINE" | awk '{print $3}')
-else
-    CH="$UP_CHANNEL"
-    BSSID="$UP_BSSID"
-    SEC="configured"
+
+echo "scanning 5G for live channel and bssid (target_ssid=$UP_SSID target_bssid=$UP_BSSID) ..."
+SCAN_RES=$(scan_resolve)
+if [ -z "$SCAN_RES" ]; then
+    echo "scan did not match target; retrying after 2s"
+    sleep 2
+    SCAN_RES=$(scan_resolve)
 fi
-echo "target bssid=$BSSID channel=$CH security=$SEC"
+
+if [ -n "$SCAN_RES" ]; then
+    RESOLVED_BSSID=$(echo "$SCAN_RES" | awk '{print $1}')
+    RESOLVED_CH=$(echo "$SCAN_RES" | awk '{print $2}')
+    echo "scan resolved: bssid=$RESOLVED_BSSID channel=$RESOLVED_CH"
+    BSSID="$RESOLVED_BSSID"
+    CH="$RESOLVED_CH"
+else
+    echo "scan found nothing; falling back to saved bssid=$UP_BSSID channel=$UP_CHANNEL"
+    BSSID="$UP_BSSID"
+    CH="$UP_CHANNEL"
+fi
+
+if [ -z "$CH" ]; then
+    echo "target channel unresolved; abort"
+    exit 1
+fi
+echo "target bssid=$BSSID channel=$CH"
 
 # 5. Associate (3-address client, MWDS=0).
-TARGET_BSSID="${UP_BSSID:-$BSSID}"
+TARGET_BSSID="$BSSID"
 if [ "$UP_AUTH" = "wpa2-eap" ]; then
     echo "initiating wpa2-eap association on channel $CH bssid $TARGET_BSSID"
     ifconfig apcli0 up
@@ -346,6 +382,8 @@ if [ ! -r /userconfig/udhcpc.script ]; then
     echo "ERROR: /userconfig/udhcpc.script missing"
     exit 1
 fi
+killall -9 udhcpc eap_ttls 2>/dev/null
+sleep 1
 rm -f /userconfig/lease_ok
 if [ -f /userconfig/last_lease ]; then
     . /userconfig/last_lease
@@ -373,6 +411,7 @@ for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
 done
 if [ "$IP_OK" -eq 0 ]; then
     echo "DHCP attempt failed; broadcast fallback"
+    killall -9 udhcpc eap_ttls 2>/dev/null
     kill "$DHC_PID" 2>/dev/null
     ip addr flush dev apcli0 2>/dev/null
     rm -f /userconfig/lease_ok
@@ -441,5 +480,68 @@ if [ -n "$SRC" ] && [ -n "$GW" ]; then
         echo "note: upstream gateway reachable, but external ICMP to 8.8.8.8 not reachable (perhaps no internet access or ICMP blocked)"
     fi
 fi
+
+# 9. Auto-reconnect watchdog (background, RAM only).
+if [ -f /tmp/f680_watchdog.pid ]; then
+    OLD_WD_PID=$(cat /tmp/f680_watchdog.pid 2>/dev/null)
+    if [ -n "$OLD_WD_PID" ]; then
+        kill "$OLD_WD_PID" 2>/dev/null
+    fi
+fi
+
+(
+    trap - EXIT INT TERM
+    f=""
+    while :; do
+        sleep 45
+        ok=1
+
+        if [ "$UP_AUTH" = "wpa2-eap" ]; then
+            if ! /userconfig/eap_ttls --verify-kmem 2>/dev/null | grep -q '0x00004001'; then
+                ok=0
+            fi
+        fi
+
+        if [ "$ok" = "1" ]; then
+            if ! ifconfig apcli0 2>/dev/null | grep -q 'inet addr:'; then
+                ok=0
+            fi
+        fi
+
+        if [ "$ok" = "1" ]; then
+            GW=$(route -n 2>/dev/null | awk '$1=="0.0.0.0" && $8=="apcli0" {print $2; exit}')
+            [ -n "$GW" ] || GW=$(ip route show dev apcli0 2>/dev/null | awk '/default/ {print $3}')
+            [ -n "$GW" ] || GW="$LAST_GATEWAY"
+            if [ -n "$GW" ]; then
+                if ! ping -c 1 -W 3 "$GW" >/dev/null 2>&1; then
+                    ok=0
+                fi
+            else
+                ok=0
+            fi
+        fi
+
+        if [ "$ok" = "1" ]; then
+            f=""
+        else
+            f="${f}x"
+            echo "$(date): health check failed ($f)" >> /tmp/f680_watchdog.log
+            if [ "$f" = "xxx" ]; then
+                echo "$(date): 3 consecutive failures; reconnecting via repeater_up.sh" >> /tmp/f680_watchdog.log
+                f=""
+                sh /userconfig/repeater_up.sh
+            fi
+        fi
+
+        if [ -f /tmp/f680_watchdog.log ]; then
+            awk '{ l[NR]=$0 } END { s=NR-99; if (s<1) s=1; for (i=s; i<=NR; i++) print l[i] }' /tmp/f680_watchdog.log > /tmp/f680_watchdog.tmp 2>/dev/null
+            mv /tmp/f680_watchdog.tmp /tmp/f680_watchdog.log 2>/dev/null
+        fi
+    done
+) >/dev/null 2>&1 &
+
+echo $! > /tmp/f680_watchdog.pid
+echo "watchdog started pid=$(cat /tmp/f680_watchdog.pid)"
+
 echo "=== repeater_up done ==="
 exit 0
